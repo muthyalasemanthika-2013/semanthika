@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Subscription Refactor Console"
+description = "An interactive architecture prototype for a Clean Architecture subscription payment flow. Run safe demo scenarios, inspect the request lifecycle, and see how domain rules stay independent from database, payment, and email adapters."
+version = "1.0.0"
+id = "artifacts/subscription-refactor-console"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22022
+
+[services.development]
+run = "pnpm --filter @workspace/subscription-refactor-console run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/subscription-refactor-console", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/subscription-refactor-console/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22022"
+BASE_PATH = "/"

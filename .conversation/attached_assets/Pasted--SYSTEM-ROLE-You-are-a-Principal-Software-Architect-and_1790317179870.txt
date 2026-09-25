@@ -1,0 +1,82 @@
+[SYSTEM ROLE]
+You are a Principal Software Architect and Master Clean Code Specialist with expertise in domain-driven design (DDD), software refactoring patterns, and test-driven development (TDD). Your goal is to modernize legacy codebases while maintaining absolute functional equivalence and ensuring zero production regressions.
+
+[CONTEXT & PROBLEM STATEMENT]
+I have a legacy Node.js software component that processes user subscription payments and updates account permissions. It suffers from high complexity, direct database calls mixed with payment gateway network requests, zero test coverage, and nested error handling.
+
+Language / Framework: Node.js v20+ with TypeScript 5+
+Target Architecture: Clean Architecture / Ports and Adapters (Hexagonal)
+
+Here is the source code:
+```typescript
+// Legacy Payment Processing Order Handler
+const db = require('./database');
+const stripe = require('stripe')('sk_test_123');
+const nodemailer = require('nodemailer');
+
+async function processSubscription(req, res) {
+  const userId = req.body.userId;
+  const planId = req.body.planId;
+  const paymentToken = req.body.paymentToken;
+
+  if (!userId || !planId || !paymentToken) {
+    return res.status(400).json({ error: "Missing parameters" });
+  }
+
+  try {
+    const userRes = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
+    const user = userRes.rows[0];
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (user.status === 'SUSPENDED') {
+      return res.status(403).json({ error: "User account is suspended" });
+    }
+
+    const planRes = await db.query('SELECT * FROM plans WHERE id = $1', [planId]);
+    const plan = planRes.rows[0];
+
+    if (!plan) {
+      return res.status(404).json({ error: "Plan not found" });
+    }
+
+    // Process charge directly with external service
+    let charge;
+    try {
+      charge = await stripe.charges.create({
+        amount: plan.priceInCents,
+        currency: 'usd',
+        source: paymentToken,
+        description: `Subscription for ${user.email}`
+      });
+    } catch (stripeErr) {
+      return res.status(402).json({ error: "Payment failed: " + stripeErr.message });
+    }
+
+    if (charge.status === 'succeeded') {
+      // Update database
+      await db.query('UPDATE users SET plan_id = $1, status = $2 WHERE id = $3', [planId, 'ACTIVE', userId]);
+      await db.query('INSERT INTO transactions (user_id, amount, stripe_id) VALUES ($1, $2, $3)', [userId, plan.priceInCents, charge.id]);
+
+      // Send email notification
+      const transporter = nodemailer.createTransport({ host: 'smtp.mail.com', port: 587 });
+      await transporter.sendMail({
+        from: 'billing@app.com',
+        to: user.email,
+        subject: 'Subscription Upgraded',
+        text: `Your account is now active on ${plan.name}`
+      });
+
+      return res.status(200).json({ success: true, transactionId: charge.id });
+    } else {
+      return res.status(400).json({ error: "Payment was not successful" });
+    }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+module.exports = { processSubscription };
